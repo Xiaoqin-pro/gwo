@@ -97,6 +97,13 @@ switch name
                              'divCriterion','minority','quotaPolicy','q','convShares',[0.7 0.9 1.0], ...
                              'qEpsStart',0.10,'qEpsEnd',0.02,'windowFE',2000,'qInit',true));
     case 'IGWO',         cfg=struct('f',@IGWO,'N',50,'state',struct());
+    case 'RASE-IGWO',    cfg=struct('f',@IGWO,'N',50,'state',struct('evalPolicy','screen', ...
+                             'K',50,'screenPolicy','geometry','divCriterion','minority','convShare',0.9));
+    case 'RASE-IGWO-r',  cfg=struct('f',@IGWO,'N',50,'state',struct('evalPolicy','screen', ...
+                             'K',50,'screenPolicy','random','convShare',0.9));
+    case 'RASE-IGWO-K25',cfg=struct('f',@IGWO,'N',50,'state',struct('evalPolicy','screen', ...
+                             'K',25,'screenPolicy','geometry','divCriterion','minority','convShare',0.9));
+    case 'RASE-IGWO-full',cfg=struct('f',@IGWO,'N',50,'state',struct('evalPolicy','full'));         cfg=struct('f',@IGWO,'N',50,'state',struct());
     otherwise
         error('algorithmConfig:unknown','Unknown algorithm: %s',name);
 end

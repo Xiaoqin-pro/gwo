@@ -47,6 +47,23 @@ assert(N0==N,'Population size mismatch: state holds %d rows, N=%d.',N0,N);
 lb=state.lowerBound; ub=state.upperBound; budget=state.maxEvaluations;
 assert(budget>=N && budget==floor(budget),'Budget must be an integer >= N.');
 assert(numel(lb)==D && numel(ub)==D,'Bound vectors must match D=%d.',D);
+% ---- screening options (defaults reproduce the published I-GWO) ----
+p=struct('evalPolicy','full','K',[],'screenPolicy','geometry', ...
+         'divCriterion','minority','convShare',0.9,'screenRngOffset',4000001);
+fn=fieldnames(p);
+for k=1:numel(fn)
+    if isfield(state,fn{k}), p.(fn{k})=state.(fn{k}); end
+end
+isScreen=strcmp(p.evalPolicy,'screen');
+screenStream=RandStream('mt19937ar','Seed',rem(seed+p.screenRngOffset,4294967295));
+if isScreen
+    Kq=p.K;
+    if isempty(Kq), Kq=N; end
+    Kq=max(1,min(2*N,round(Kq)));
+else
+    Kq=2*N;
+end
+
 rng(seed,'twister');
 clockStart=tic;
 
@@ -84,7 +101,11 @@ while fe<budget
             Delta=fitness; Delta_pos=X(i,:);
         end
     end
-    aC=2-iter*(2/maxIter);
+    if isScreen
+        aC=2-2*(fe-N)/max(1,budget-N);      % schedule tied to evaluation progress
+    else
+        aC=2-iter*(2/maxIter);              % published I-GWO schedule
+    end
 
     % ---- candidate X_GWO (classic GWO move, per dimension) ----
     A1=2*aC*rand(N,D)-aC; C1=2*rand(N,D);
@@ -111,16 +132,36 @@ while fe<budget
     end
     Xd=igwoBounds(Xd,X,lb,ub);           % (4)
 
-    % ---- evaluate both candidates; a wolf keeps only strict improvements ----
-    for i=1:N
-        if fe>=budget, break; end
-        vg=f(Xg(i,:));
-        fe=fe+1; bestEver=min(bestEver,vg); T(fe)=bestEver;
-        if vg<pBestScore(i), pBest(i,:)=Xg(i,:); pBestScore(i)=vg; end
-        if fe>=budget, break; end
-        vd=f(Xd(i,:));
-        fe=fe+1; bestEver=min(bestEver,vd); T(fe)=bestEver;
-        if vd<pBestScore(i), pBest(i,:)=Xd(i,:); pBestScore(i)=vd; end
+    % ---- select which candidates consume true evaluations ----
+    C=[Xg; Xd];                       % rows 1..N = X_GWO, N+1..2N = X_DLH
+    if isScreen
+        % Only the screened subset is evaluated.  If the budget ends inside the
+        % generation, the remaining candidates are simply not evaluated; the
+        % wolves keep their personal records (which is what the verified-state
+        % decoupling means).
+        sel=igwoScreen(C,X,Alpha_pos,Beta_pos,Delta_pos,Kq,p,screenStream);
+        for sIdx=sel
+            if fe>=budget, break; end
+            i=1+mod(sIdx-1,N);
+            v=f(C(sIdx,:));
+            fe=fe+1; bestEver=min(bestEver,v); T(fe)=bestEver;
+            if v<pBestScore(i), pBest(i,:)=C(sIdx,:); pBestScore(i)=v; end
+        end
+    else
+        % Published I-GWO order: both candidates of a wolf back to back.  The
+        % order is kept deliberately -- with a budget that is not a multiple of
+        % 2N the last generation is partial, and the interleaved order evaluates
+        % a different (and for I-GWO canonical) subset than a block order would.
+        for i=1:N
+            if fe>=budget, break; end
+            vg=f(C(i,:));
+            fe=fe+1; bestEver=min(bestEver,vg); T(fe)=bestEver;
+            if vg<pBestScore(i), pBest(i,:)=C(i,:); pBestScore(i)=vg; end
+            if fe>=budget, break; end
+            vd=f(C(N+i,:));
+            fe=fe+1; bestEver=min(bestEver,vd); T(fe)=bestEver;
+            if vd<pBestScore(i), pBest(i,:)=C(N+i,:); pBestScore(i)=vd; end
+        end
     end
     X=pBest; fit=pBestScore;             % (1)
     iter=iter+1;
@@ -134,9 +175,56 @@ info.Rounds=rounds;
 info.MeanEvalsPerRound=fe/max(rounds,1);
 info.WallClock=toc(clockStart);
 info.Algorithm='IGWO';
+info.EvalPolicy=p.evalPolicy;
+info.K=Kq;
+info.ScreenPolicy=p.screenPolicy;
 end
 
 % ===================== helpers =====================
+function sel=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream)
+%IGWOSCREEN  Choose Kq of the 2N generated candidates to evaluate.
+%   Convergence slots go to the candidates nearest the leader-consensus centre,
+%   exploration slots to the candidates nearest the minority leader (the member
+%   of the elite triangle farthest from that centre).  Purely geometric: no
+%   model is trained and no fitness is estimated.
+n=size(C,1);
+if strcmp(p.screenPolicy,'random')
+    sel=randperm(stream,n,Kq); return;
+end
+XL=(Xa+Xb+Xd)/3;
+dc=sqrt(sum((C-XL).^2,2));
+switch p.divCriterion
+    case 'minority'
+        cand=[Xa;Xb;Xd];
+        [~,mi]=max(sqrt(sum((cand-XL).^2,2)));
+        dd=sqrt(sum((C-cand(mi,:)).^2,2));
+        [~,dOrd]=sortrows(dd);
+    case 'leaders'
+        dd=min([sqrt(sum((C-Xa).^2,2)),sqrt(sum((C-Xb).^2,2)), ...
+                sqrt(sum((C-Xd).^2,2))],[],2);
+        [~,dOrd]=sortrows(-dd);
+    otherwise
+        Cent=mean(X,1);
+        dd=sqrt(sum((C-Cent).^2,2));
+        [~,dOrd]=sortrows(-dd);
+end
+[~,cOrd]=sortrows(dc);
+Kc=round(p.convShare*Kq); Kc=max(0,min(Kq,Kc)); Kd=Kq-Kc;
+sel=[cOrd(1:min(Kc,n)); dOrd(1:min(Kd,n))];
+sel=unique(sel,'stable')';
+ci=Kc+1; di=Kd+1; takeConv=true;
+while numel(sel)<min(Kq,n) && (ci<=n || di<=n)
+    if takeConv
+        while ci<=n && any(sel==cOrd(ci)), ci=ci+1; end
+        if ci<=n, sel(end+1)=cOrd(ci); ci=ci+1; end %#ok<AGROW>
+    else
+        while di<=n && any(sel==dOrd(di)), di=di+1; end
+        if di<=n, sel(end+1)=dOrd(di); di=di+1; end %#ok<AGROW>
+    end
+    takeConv=~takeConv;
+end
+end
+
 function V=igwoBounds(V,old,lb,ub)
 %IGWOBOUNDS  Authors' midpoint bound repair (mechanism 4).
 LB=repmat(lb,size(V,1),1);
