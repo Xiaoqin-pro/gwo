@@ -50,7 +50,7 @@ assert(numel(lb)==D && numel(ub)==D,'Bound vectors must match D=%d.',D);
 % ---- screening options (defaults reproduce the published I-GWO) ----
 p=struct('evalPolicy','full','K',[],'screenPolicy','geometry','parentAware','off', ...
          'successGuide','off','successFrac',0.25,'successArchive',20, ...
-         'successRandom',false,'guideRngOffset',5000001, ...
+         'successRandom',false,'guideRngOffset',5000001,'sequential',0, ...
          'divCriterion','minority','convShare',0.9,'screenRngOffset',4000001);
 fn=fieldnames(p);
 for k=1:numel(fn)
@@ -163,8 +163,33 @@ while fe<budget
         % generation, the remaining candidates are simply not evaluated; the
         % wolves keep their personal records (which is what the verified-state
         % decoupling means).
-        sel=igwoScreen(C,X,Alpha_pos,Beta_pos,Delta_pos,Kq,p,screenStream,N);
-        for sIdx=sel
+        [sel,ordAll]=igwoScreen(C,X,Alpha_pos,Beta_pos,Delta_pos,Kq,p,screenStream,N);
+        assert(numel(sel)==numel(unique(sel)),'screen returned a duplicated candidate');
+        d=min(p.sequential,max(0,numel(sel)-1));
+        selFirst=sel(1:numel(sel)-d);  selRest=sel(numel(sel)-d+1:end);
+        improved=false(numel(selFirst),1);
+        for q1=1:numel(selFirst)
+            if fe>=budget, break; end
+            sIdx=selFirst(q1);
+            i=1+mod(sIdx-1,N);
+            v=f(C(sIdx,:));
+            fe=fe+1; bestEver=min(bestEver,v); T(fe)=bestEver;
+            improved(q1)=v<pBestScore(i);
+            if improved(q1)
+                if useGuide
+                    SuccS=[SuccS; C(sIdx,:)-pBest(i,:)]; %#ok<AGROW>
+                    SuccX=[SuccX; pBest(i,:)];          %#ok<AGROW>
+                    if size(SuccS,1)>p.successArchive
+                        SuccS(1,:)=[]; SuccX(1,:)=[];
+                    end
+                end
+                pBest(i,:)=C(sIdx,:); pBestScore(i)=v;
+            end
+        end
+        if d>0
+            selRest=igwoReselect(selFirst,improved,ordAll,selRest,N,p);
+        end
+        for sIdx=selRest
             if fe>=budget, break; end
             i=1+mod(sIdx-1,N);
             v=f(C(sIdx,:));
@@ -232,10 +257,11 @@ info.ScreenPolicy=p.screenPolicy;
 info.ParentAware=p.parentAware;
 info.SuccessGuide=p.successGuide;
 info.SuccessArchiveSize=size(SuccS,1);
+info.Sequential=p.sequential;
 end
 
 % ===================== helpers =====================
-function sel=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream,N)
+function [sel,ordAll]=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream,N)
 %IGWOSCREEN  Choose Kq of the 2N generated candidates to evaluate.
 %   Convergence slots go to the candidates nearest the leader-consensus centre,
 %   exploration slots to the candidates nearest the minority leader (the member
@@ -243,7 +269,7 @@ function sel=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream,N)
 %   model is trained and no fitness is estimated.
 n=size(C,1);
 if strcmp(p.screenPolicy,'random')
-    sel=randperm(stream,n,Kq); return;
+    sel=randperm(stream,n,Kq); ordAll=randperm(stream,n); return;
 end
 XL=(Xa+Xb+Xd)/3;
 dc=sqrt(sum((C-XL).^2,2));
@@ -288,7 +314,7 @@ if strcmp(p.parentAware,'cover2') && strcmp(p.screenPolicy,'geometry')
         end
         sel2=[sel2, got]; %#ok<AGROW>
     end
-    sel=sel2;
+    sel=unique(sel2,'stable');   % cross-group de-duplication (was missing)
 end
 if strcmp(p.parentAware,'cover') && strcmp(p.screenPolicy,'geometry')
     % PAEA (original, kept for the record): coverage-first over the union of both families.
@@ -310,6 +336,7 @@ if strcmp(p.parentAware,'cover') && strcmp(p.screenPolicy,'geometry')
     end
     sel=pick;
 end
+ordAll=unique([cOrd; dOrd],'stable')';
 ci=Kc+1; di=Kd+1; takeConv=true;
 while numel(sel)<min(Kq,n) && (ci<=n || di<=n)
     if takeConv
@@ -320,6 +347,30 @@ while numel(sel)<min(Kq,n) && (ci<=n || di<=n)
         if di<=n, sel(end+1)=dOrd(di); di=di+1; end %#ok<AGROW>
     end
     takeConv=~takeConv;
+end
+end
+
+function rest2=igwoReselect(selFirst,improved,ordAll,selRest,N,p)
+%IGWORESELECT  SFVE: the real feedback of the first verification batch decides
+%   WHICH candidates fill the deferred slots -- not merely in what order.  The
+%   deferred slots are re-drawn from the whole candidate pool (including the
+%   candidates the geometric screen had rejected), preferring the branch whose
+%   evaluated candidates improved their parent more often.  If the two branches
+%   are equally successful the original screened order is kept.
+br=@(s) 1+(s>N);
+b1=br(selFirst);
+hG=0; hD=0;
+if any(b1==1), hG=mean(improved(b1==1)); end
+if any(b1==2), hD=mean(improved(b1==2)); end
+d=numel(selRest);
+if hG==hD, rest2=selRest; return; end      % no usable signal -> keep the screen
+if hD>hG, pref=2; else, pref=1; end
+pool=ordAll(~ismember(ordAll,selFirst));
+a=pool(br(pool)==pref);
+rest2=a(1:min(d,numel(a)));
+if numel(rest2)<d                        % top up from the other branch
+    b=pool(~ismember(pool,rest2));
+    rest2=[rest2 b(1:d-numel(rest2))];
 end
 end
 
