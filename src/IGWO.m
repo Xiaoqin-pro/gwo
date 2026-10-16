@@ -266,8 +266,32 @@ end
 Kc=round(p.convShare*Kq); Kc=max(0,min(Kq,Kc)); Kd=Kq-Kc;
 sel=[cOrd(1:min(Kc,n)); dOrd(1:min(Kd,n))];
 sel=unique(sel,'stable')';
-if ~strcmp(p.parentAware,'off') && strcmp(p.screenPolicy,'geometry')
-    % PAEA: coverage-first pass over the union of both families.
+if strcmp(p.parentAware,'cover2') && strcmp(p.screenPolicy,'geometry')
+    % PAEA-2: coverage-first WITHIN each potential group, so the 90/10 dual
+    % potential quota (Kc centre slots + Kd minority-leader slots) is preserved.
+    % The original PAEA scanned cOrd then dOrd as one list, which let the centre
+    % group fill every slot and silently turned the quota into ~100% centre.
+    par2=@(s) 1+mod(s-1,N);
+    sel2=[];
+    groups={cOrd(1:min(n,numel(cOrd))), dOrd(1:min(n,numel(dOrd)))};
+    wants=[Kc Kd];
+    for gi=1:2
+        grp=groups{gi}; want=wants(gi);
+        cov=false(N,1); got=[];
+        for c=grp'
+            if numel(got)>=want, break; end
+            if ~cov(par2(c)), got(end+1)=c; cov(par2(c))=true; end %#ok<AGROW>
+        end
+        for c=grp'
+            if numel(got)>=want, break; end
+            if ~any(got==c), got(end+1)=c; end %#ok<AGROW>
+        end
+        sel2=[sel2, got]; %#ok<AGROW>
+    end
+    sel=sel2;
+end
+if strcmp(p.parentAware,'cover') && strcmp(p.screenPolicy,'geometry')
+    % PAEA (original, kept for the record): coverage-first over the union of both families.
     % Candidate s belongs to parent 1+mod(s-1,N).
     par=@(s) 1+mod(s-1,N);
     covered=false(N,1);
