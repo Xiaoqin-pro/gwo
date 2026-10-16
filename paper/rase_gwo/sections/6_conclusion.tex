@@ -1,0 +1,31 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper studied the allocation of expensive true evaluations in the grey wolf
+optimizer. The starting observation is structural: GWO's search direction is
+produced by three positions, yet the canonical algorithm evaluates its whole
+population every generation. We proposed RASE-GWO, which separates a wolf's
+virtual search position from its verified position, keeps a candidate pool that
+is an order of magnitude larger than the per-round evaluation quota, and assigns
+that quota by a surrogate-free geometric rule that combines consensus refinement
+with minority-leader probing. Only verified positions may enter the
+$\alpha/\beta/\delta$ hierarchy, which is what makes sparse evaluation sound for
+a leader-driven algorithm. A small Q-learner adapts the split between the two
+groups without knowledge of the problem landscape.
+
+The empirical study on CEC2017 at $D=50$ holds the true-evaluation budget, the
+number of generations and the initial populations fixed, so every difference
+between the compared algorithms is attributable to candidate selection. Under
+that protocol the proposed mechanism improves on canonical GWO, and the ablation
+isolates the contribution of the geometric screening, the over-sampled candidate
+pool and the verification decoupling. Equally important, the study delimits the
+framework: reducing the per-round quota without over-sampling does not pay off
+for GWO, crowd-level diversity scoring is ineffective in a leader-driven
+algorithm, and shrinking the population is not a substitute for screening a
+larger candidate pool.
+
+Future work follows three directions: extending the screening to multiple
+objectives and to constrained problems, replacing the tabular Q-learner with a
+function approximation that can condition on measurable landscape features, and
+applying the framework to expensive engineering simulators, where position
+updates are negligible compared with a single objective evaluation.

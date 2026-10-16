@@ -17,3 +17,17 @@ desktop.ini
 
 # Output
 *.pdf.tmp
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# LaTeX build products
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.synctex.gz
+texput.log

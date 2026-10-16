@@ -1,0 +1,27 @@
+\documentclass[journal,10pt]{IEEEtran}
+\usepackage{amsmath,amssymb,bm,booktabs,array,graphicx,caption,multirow,url,xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!45!black]{hyperref}
+\newcommand{\R}{\mathbb{R}}\newcommand{\FE}{\mathrm{FE}}\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\graphicspath{{figures/}}
+\begin{document}
+\title{Resource-Aware Sparse-Evaluation Grey Wolf Optimizer:\\
+Spending Scarce True Evaluations on Leader-Consensus Candidates}
+\author{Author names and affiliations to be completed}
+\maketitle
+\begin{abstract}
+\input{sections/0_abstract}
+\end{abstract}
+\begin{IEEEkeywords}
+grey wolf optimizer, expensive black-box optimization, sparse evaluation,
+geometric candidate screening, evaluation budget allocation, reinforcement learning
+\end{IEEEkeywords}
+\input{sections/1_introduction}
+\input{sections/2_related_work}
+\input{sections/3_method}
+\input{sections/4_experiments}
+\input{sections/5_ablation}
+\input{sections/6_conclusion}
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+\end{document}

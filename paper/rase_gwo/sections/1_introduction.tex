@@ -1,0 +1,99 @@
+\section{Introduction}
+
+Metaheuristic search is increasingly applied to problems whose objective
+function is a numerical simulation: a finite-element sweep, a computational
+fluid dynamics run, a trajectory evaluation, or a discrete-event model of a
+production line. In these settings a single evaluation may take seconds to
+hours, and the number of evaluations that fit into a project is a hard
+constraint. The dominant cost is therefore not arithmetic but the number of
+calls to the simulator.
+
+Population-based metaheuristics were nevertheless designed under the opposite
+assumption. The grey wolf optimizer (GWO) \cite{mirjalili2014gwo} maintains a
+population of $N$ wolves and evaluates every one of them in every generation.
+GWO's search direction, however, is produced by three positions only: the alpha,
+beta and delta wolves that define the apex of the hierarchy. The remaining
+wolves are attracted to the triangle these three span but do not shape it. Once
+the population has clustered into a promising basin, consecutive wolves are
+spatially close and, by the local smoothness of continuous objectives, their
+fitness values are close as well; evaluating all of them again is largely
+redundant.
+
+The natural question is thus not how to design yet another GWO variant, but
+
+\begin{quote}
+\emph{when true evaluations are the scarce resource and candidate generation is
+cheap, which candidates should receive them?}
+\end{quote}
+
+This re-frames the problem from \emph{search operator design} to
+\emph{evaluation resource allocation}. The distinction matters for novelty: the
+literature already contains many GWO variants that adjust the search equations,
+select the leaders, or schedule operators with reinforcement learning
+\cite{...}. Far fewer ask how a GWO should spend its evaluation budget.
+
+Sparse-evaluation frameworks have recently been developed for particle swarm
+optimization (PSO) and competitive swarm optimization (CSO), where a fixed
+fraction of the population is evaluated per generation and the saved budget
+funds additional generations \cite{ssl-pso,ss-rlpso,saq-cso}. Transferring that
+idea to GWO is not immediate, for two reasons that this paper addresses.
+
+\emph{First, GWO has no memory.} In PSO each particle carries a personal best
+that was evaluated at some point in the past; in CSO the competition between
+pairs creates the same persistence. Sparse evaluation in those algorithms
+therefore removes evaluations while leaving the memory that guides the search
+intact. GWO has no such anchor: if unevaluated wolves are allowed to act as
+alpha, beta and delta, the search is steered by positions that were never
+verified and may be arbitrarily bad. We solve this by storing a
+\emph{verified} position separately from the virtual search position and
+restricting the leader hierarchy to verified positions.
+
+\emph{Second, in a leader-driven algorithm diversity at the crowd level is
+useless.} Sparse-evaluation PSO and CSO frameworks spend part of the quota on
+individuals that are far from the population centroid, arguing that they explore
+untested regions. In GWO such an individual influences the search only if it
+enters the elite triangle, which in a bounded high-dimensional search space
+essentially never happens for an extreme outlier. Our screening rule therefore
+replaces crowd-level diversity with \emph{leader-level} diversity: the
+exploration quota is spent near the minority leader, i.e. on the member of the
+current elite triangle that lies farthest from the leader consensus, so that a
+second and third basin are kept alive rather than abandoned.
+
+Based on these two observations we propose the Resource-Aware Sparse-Evaluation
+Grey Wolf Optimizer (RASE-GWO). The virtual population is $\kappa$ times larger
+than the quota, the quota is allocated by a geometry-based, surrogate-free
+screening rule, and a six-state, three-action Q-learning agent adapts the split
+between refinement and minority-leader probing online. The method changes none
+of GWO's search equations.
+
+The contributions are as follows.
+\begin{enumerate}
+  \item \textbf{A decoupled evaluation framework for leader-driven
+  metaheuristics.} Virtual and verified positions are separated, and the elite
+  triangle is drawn exclusively from verified positions. This makes sparse
+  evaluation sound for GWO and is the mechanism that a direct transfer from
+  sparse PSO/CSO frameworks lacks.
+  \item \textbf{A dual-potential geometric screening rule.} Consensus
+  refinement selects candidates near the leader-consensus centre; minority
+  leader probing selects candidates near the leader that is farthest from that
+  centre. Both scores cost $O(MD)$, no surrogate is trained, and therefore no
+  approximation error is introduced.
+  \item \textbf{Over-sampling as the actual resource lever.} Holding both the
+  true-evaluation budget and the number of generations fixed, enlarging the
+  candidate pool from $N$ to $M$ wolves while keeping the per-round quota at
+  $K$ improves accuracy monotonically with the over-sampling factor. The added
+  cost is arithmetic, not evaluative.
+  \item \textbf{Evidence about what does not work.} We report that (i) for GWO
+  the sparse-evaluation schedule of reducing the per-round quota without
+  over-sampling is clearly harmful at an equal number of generations,
+  (ii) crowd-level diversity scoring converts very few evaluations into
+  improvements, and (iii) simply shrinking the population is clearly inferior.
+  These negative results delimit the framework instead of being tuned away.
+\end{enumerate}
+
+The remainder of the paper is organised as follows.
+Section~\ref{sec:related} reviews related work.
+Section~\ref{sec:method} presents RASE-GWO.
+Sections~\ref{sec:exp} and~\ref{sec:ablation} report the benchmark study and the
+ablation.
+Section~\ref{sec:conclusion} concludes.

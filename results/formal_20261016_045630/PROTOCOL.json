@@ -1,0 +1,33 @@
+{
+  "batch": "formal_20261016_045630",
+  "mode": "over (run_screen) / equivalent to run_batch('formal')",
+  "protocol": "equalFE",
+  "functions": "F1, F3-F30 (CEC2017, 29 functions)",
+  "dimension": 50,
+  "maxEvaluations": 100000,
+  "seeds": "3001-3030",
+  "populationPool": 1000,
+  "populationRule": "one shared pool per (function,seed): 50 points drawn first (identical to the 9.29 protocol), then extended to 1000; every algorithm consumes a prefix",
+  "initSeedFormula": "261013000 + functionID*10000 + seed",
+  "searchSeedFormula": "initSeed + 1000000",
+  "algorithms": [
+    {"name":"GWO","N":50,"note":"canonical, full-population synchronous baseline"},
+    {"name":"Over1000-90q3","N":1000,"K":50,"screen":"geometry","divCriterion":"minority","quota":"Q-learning {0.7,0.9,1.0}","note":"proposed RASE-GWO"},
+    {"name":"Fixed55min","N":1000,"K":50,"quota":"fixed 0.5"},
+    {"name":"Over1000-90min","N":1000,"K":50,"quota":"fixed 0.9"},
+    {"name":"Over1000-100","N":1000,"K":50,"quota":"fixed 1.0"},
+    {"name":"Over1000-90r","N":1000,"K":50,"screen":"random","note":"screening ablated"},
+    {"name":"Over1000-90nv","N":1000,"K":50,"useVirtual":false,"note":"verification decoupling ablated"}
+  ],
+  "externalBaselines": {
+    "source": "D:/111/Desktop/噜噜/9.29/CEC2017_8Algorithm_30Seed/results/main_8algorithms/all_quality_runs.csv",
+    "algorithms": ["HIDMS-PSO-IndexCorrected","HCLPSO-AuthorSource","DMS-PSO-SIS2005","SAQ-CSO","SPSO-2011-OfficialC","HPSO-TVAC-CEC","CLPSO-AuthorSource","Original-CSO-MR02"],
+    "mergeCondition": "identical CEC2017 build, identical seed convention, identical initial point pool; verified pointwise via the recorded initial best for F1/seed3001 (2.2843261789913e11)",
+    "populationSizes": "40 for SPSO-2011 and HIDMS-PSO, 30 for DMS-PSO, 50 otherwise"
+  },
+  "statistics": ["per-function mean/std of error", "average rank over function means", "two-sided Wilcoxon rank-sum with Holm correction (per comparison family)", "Friedman test"],
+  "runs": 13050,
+  "failures": 0,
+  "wallClockMinutes": 134.5,
+  "machine": "MATLAB R2025b, 4 parallel workers"
+}

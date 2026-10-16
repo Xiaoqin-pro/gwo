@@ -1,0 +1,75 @@
+\section{Experimental Design}
+\label{sec:exp}
+
+\subsection{Benchmark, budget and protocol}
+
+All experiments use the IEEE CEC2017 single-objective bound-constrained suite
+at $D=50$, with the search range $[-100,100]$ and the standard shift and
+rotation data of the official release. Following the convention of the suite,
+$F2$ is excluded, leaving 29 functions ($F1$ and $F3$--$F30$).
+
+The comparison protocol is fixed before the results are inspected:
+
+\begin{itemize}
+  \item \textbf{Budget.} Every algorithm consumes at most
+        $10^{5}$ true evaluations per run, counted from initialization.
+  \item \textbf{Generations.} Because GWO evaluates its whole population of
+        $N=50$ wolves per generation and RASE-GWO spends a quota of
+        $K=50$ per round, both perform $\approx 2000$ generations within the
+        budget. RASE-GWO with $M=1000$ therefore matches its baseline in
+        generations and in true evaluations; it differs only in the number of
+        cheap candidate updates used to choose those evaluations.
+  \item \textbf{Initial populations.} One random point pool is drawn per
+        (function, seed) and every algorithm consumes a prefix of it. Algorithms
+        with $N=50$ therefore start from identical points, and the reduced
+        population controls reuse the same prefix. The pool generation was
+        verified pointwise against an independent implementation: the recorded
+        best of the initial 50 points for $F1$/seed~3001 reproduces to the last
+        digit (2.2843261789913$\times 10^{11}$).
+  \item \textbf{Seeds.} 30 independent runs per algorithm and function
+        (seeds 3001--3030). Every algorithm sees the same 30 seeds.
+  \item \textbf{Statistics.} Per-function mean and standard deviation of the
+        error $f(\hat{x}) - f_i^\star$; average rank over function means;
+        two-sided Wilcoxon rank-sum tests at $\alpha=0.05$ with Holm correction
+        inside each comparison family; Friedman test over function means.
+        No function is excluded and no result is re-run to improve its value.
+  \item \textbf{Runtime.} Reported as descriptive statistics only. CEC2017
+        objectives are cheap, so the arithmetic overhead of RASE-GWO is visible
+        in wall-clock time; the framework is intended for objectives where one
+        evaluation dominates.
+\end{itemize}
+
+\subsection{Compared algorithms}
+
+Two groups are reported.
+
+\textbf{Evaluation-budget family.} Canonical GWO and the ablation variants of
+RASE-GWO: the full method; a fixed-quota variant at $5{:}5$; a fixed-quota
+variant at $9{:}1$ with minority-leader probing; a fixed-quota variant with
+$s=1$ (consensus refinement only); a variant with random candidate selection
+instead of geometric screening; and a variant in which the leader hierarchy
+reads the unverified virtual positions. These variants share the movement
+equation, the budget and the initial points, so each contrast isolates one
+mechanism.
+
+\textbf{External baselines.} Nine published algorithms run under the identical
+protocol (same CEC2017 build, same seeds, same initial pool share, same budget)
+in an earlier, independently produced batch of the same research line:
+competitive swarm optimizer (CSO) \cite{cheng2015cso}, comprehensive learning
+PSO (CLPSO) \cite{liang2006clpso}, HPSO-TVAC, SPSO-2011, HCLPSO, HIDMS-PSO,
+DMS-PSO and a sparse adaptive-quota CSO. Reusing this batch is legitimate
+because the harness is shared at the level of the CEC2017 evaluation, the seed
+convention and the initial point pool; the pointwise verification described
+above is what licenses the merge. \TODO{confirm the final baseline list and the
+per-algorithm population sizes ($40$ for SPSO-2011 and HIDMS-PSO, $30$ for
+DMS-PSO, $50$ otherwise) before submission.}
+
+\subsection{Implementation}
+
+MATLAB R2025b. Each configuration is executed on four parallel workers; runs
+are independent, and the random streams of the search and of the screening
+policy are separated (distinct \texttt{RandStream} objects) so that switching
+an ablation flag cannot perturb the search trajectory of another variant.
+Table~\ref{tab:main} reports the main comparison.
+
+\input{tables/main_rows}

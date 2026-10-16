@@ -1,0 +1,82 @@
+\section{Ablation and Analysis}
+\label{sec:ablation}
+
+\subsection{Component ablation}
+
+Table~\ref{tab:ablation} reports the ablation on the same 29 functions and 30
+seeds. Each row changes exactly one mechanism of the full method.
+
+\begin{table*}[t]
+\centering
+\caption{Component ablation on CEC2017, $D=50$, $10^{5}$ true evaluations, 30 seeds.}
+\label{tab:ablation}
+\begin{tabular}{lcccc}
+\toprule
+Variant & Dual state & Geometric screening & $M>K$ & Quota \\
+\midrule
+GWO & -- & -- & -- & -- \\
+RASE-GWO & \checkmark & \checkmark & \checkmark & Q-learning \\
+fixed $5{:}5$ & \checkmark & \checkmark & \checkmark & fixed \\
+fixed $9{:}1$ & \checkmark & \checkmark & \checkmark & fixed \\
+fixed $1{:}0$ & \checkmark & \checkmark & \checkmark & fixed \\
+random screening & \checkmark & -- & \checkmark & fixed \\
+unverified leaders & -- & \checkmark & \checkmark & fixed \\
+dense synchronous & \checkmark & \checkmark & -- & -- \\
+reduced population & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Over-sampling factor}
+
+The evaluation ratio $\rho = K/M$ controls how many candidates compete for the
+$K$ evaluation slots. Reducing it (larger $M$ at fixed $K$) selects the quota
+from a larger candidate pool at no extra evaluation cost. Table~\ref{tab:msweep}
+reports the 11-configuration screen used to choose the default.
+
+\subsection{Crowd-level versus leader-level diversity}
+
+The screening rule inherited from sparse PSO/CSO frameworks spends part of the
+quota on individuals far from the population centroid. In a leader-driven
+algorithm such an individual only matters if it enters the elite triangle, which
+rarely happens for an extreme outlier. Replacing that criterion with
+minority-leader probing (using the leader farthest from the consensus centre)
+allocates the same quota to a second basin instead. The difference between the
+two rules is reported together with the fraction of diversity-quota evaluations
+that produce an improvement of the best verified fitness.
+
+\subsection{What the Q-learner learns}
+
+Because the state includes the third of the budget consumed, the learned policy
+can be read directly. Averaged over runs and problems the agent converges to an
+exploitation-dominant policy, briefly opens the minority-leader quota in the
+middle third of the budget, and closes it again in the final third. This is
+consistent with the fixed-quota study: the consensus-refinement share should be
+high throughout, but a temporary opening is what allows a second basin to be
+recovered. The learned split is reported per phase.
+
+\subsection{Negative results}
+
+Three findings constrain the claims of this paper and are reported in full.
+
+\textbf{Sparse evaluation without over-sampling.} Holding the number of
+generations equal, spending $K=10$ evaluations per round instead of $K=50$ is
+clearly harmful on the 12-function development screen, even with the saved
+budget converted into five times as many rounds. The saved evaluations do not
+buy back the information lost by evaluating a fifth of the candidates, so the
+``fewer evaluations at equal accuracy'' claim that holds for sparse-evaluation
+PSO/CSO does not transfer to GWO. This is why the paper is framed around the
+allocation of a \emph{fixed} evaluation budget rather than its reduction.
+
+\textbf{Crowd-level diversity.} Scoring exploration candidates by distance from
+the population centroid converts very few evaluations into improvements; the
+minority-leader criterion is used instead.
+
+\textbf{Population reduction.} Simply running GWO with ten wolves, which
+matches the number of evaluations per round of the sparse development screen, is
+the weakest configuration tested. Over-sampling the candidate pool and reducing
+its size are therefore not interchangeable.
+
+\subsection{Behaviour of the learned policy}
+\TODO{insert the per-phase learned share table/figure once the formal batch is
+analysed, and the convergence curves from \texttt{traces.mat}.}

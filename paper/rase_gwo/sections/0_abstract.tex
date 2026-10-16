@@ -1,0 +1,33 @@
+% NOTE: numbers in this file are placeholders until the formal batch is analysed.
+% The reporting rule of this project: every number in the paper must be traceable
+% to a raw batch under results/, and no unfavourable function may be dropped.
+Traditional swarm intelligence algorithms evaluate their entire population at
+every generation. When one objective evaluation consumes a costly simulation,
+this full-population paradigm spends most of the budget on candidates whose
+fitness is already implied by their neighbours. This paper studies the resulting
+resource-allocation problem for the grey wolf optimizer (GWO), a leader-driven
+algorithm whose search direction is controlled by only three positions. We
+propose the Resource-Aware Sparse-Evaluation Grey Wolf Optimizer (RASE-GWO),
+which decouples candidate generation from candidate evaluation. A virtual
+population of $M$ wolves moves under the unmodified GWO equations at negligible
+cost, but only $K \ll M$ of them consume true evaluations; the quota is assigned
+by a dual-potential geometric screening rule that selects candidates near the
+leader-consensus centre for refinement and candidates near the minority leader
+to keep a second basin alive. Only verified positions may enter the
+$\alpha/\beta/\delta$ hierarchy, which prevents unevaluated movement from
+contaminating the search direction, and a tabular Q-learning agent reallocates
+the split between the two candidate groups from a bounded, scale-invariant
+reward. On the CEC2017 benchmark at $D=50$ with an identical budget of
+$10^{5}$ true evaluations and an identical number of generations, RASE-GWO
+improves the mean error of canonical GWO on LIBRARY-NUMBERS-PLACEHOLDER of 29
+functions with a median error ratio of RATIO-PLACEHOLDER, while covering the
+same number of true evaluations. Ablation studies show that the geometric
+screening, the over-sampled candidate pool and the verification decoupling each
+contribute, and that evaluating wolves that are far from the swarm centroid --
+the criterion inherited from sparse-evaluation particle swarm frameworks --
+converts very few evaluations into improvements. We also report two negative
+results that delimit the framework: for GWO the sparse-evaluation schedule does
+not pay off when the per-round quota is reduced without over-sampling, and a
+naive population reduction is clearly inferior. The additional cost of
+RASE-GWO is arithmetic rather than evaluative, which makes it attractive for
+optimization driven by expensive simulations.

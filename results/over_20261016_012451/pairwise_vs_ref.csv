@@ -1,0 +1,9 @@
+Algorithm,FunctionMean_wins,FunctionMean_losses,FunctionMean_ties,PairedSeed_wins,PairedSeed_losses,PairedSeed_ties,Holm_sig_better,Holm_sig_worse,Holm_not_sig,MeanErrorRatio_vs_ref
+GWO-N10,0,12,0,22,98,0,0,0,12,1.8068721173654838
+DenseSync,0,12,0,5,115,0,0,0,12,2.268761170728652
+Over100-90,1,11,0,16,104,0,0,0,12,1.8467005851540288
+Over250-55,3,9,0,34,86,0,0,0,12,1.5358432415065175
+Over250-70,3,9,0,35,85,0,0,0,12,1.2470169592745426
+Over250-90,4,8,0,38,82,0,0,0,12,1.2885618528259675
+Over500-90,6,6,0,63,57,0,0,0,12,0.9552681239844169
+Over250-90r,2,10,0,25,95,0,0,0,12,1.5717550227339425

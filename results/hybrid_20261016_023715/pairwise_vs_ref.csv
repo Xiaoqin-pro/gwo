@@ -1,0 +1,4 @@
+Algorithm,FunctionMean_wins,FunctionMean_losses,FunctionMean_ties,PairedSeed_wins,PairedSeed_losses,PairedSeed_ties,Holm_sig_better,Holm_sig_worse,Holm_not_sig,MeanErrorRatio_vs_ref
+Over1000-90q3,7,6,0,18,21,0,0,0,13,0.9860219142723683
+Over1000-90min,7,6,0,20,19,0,0,0,13,0.9631629254377877
+Over1000-100,6,7,0,16,23,0,0,0,13,1.002164331811623

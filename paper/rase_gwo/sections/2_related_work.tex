@@ -1,0 +1,71 @@
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Grey wolf optimizer and its variants}
+
+GWO was introduced by Mirjalili et al.\ \cite{mirjalili2014gwo} and models the
+social hierarchy and encircling behaviour of grey wolves. Its simplicity and its
+small number of parameters have made it a popular base for modification. Most
+subsequent work adjusts the search behaviour: nonlinear or adaptive convergence
+factors, chaotic initialisation, opposition-based learning, Gaussian and
+L\'evy perturbations, crossover and elite mutation operators, and alternative
+leadership selection rules \cite{...}. A second family combines GWO with local
+search or with other metaheuristics in a hybrid scheme. A third family embeds
+reinforcement learning, typically to select among search operators or to tune
+parameters online \cite{...}. All of these modify \emph{how the wolves move}.
+
+The present work is orthogonal to that axis. The movement equation of
+\eqref{eq:move} is the published one; what is changed is which of the many
+candidates the algorithm is allowed to verify with the true objective.
+
+\subsection{Surrogate-assisted GWO for expensive optimization}
+
+When evaluations are expensive, the established remedy is to replace the
+objective with a cheap approximation and to call the true function only for a
+few promising candidates. Surrogate-assisted GWO has been studied for
+high-dimensional expensive black-box problems \cite{sagwo2020}, and
+active-learning Kriging variants have followed. The approach is effective but
+carries structural costs: training a Gaussian process or RBF model is
+$O(N_s^3)$ in the number of samples, the model must be re-trained as the archive
+grows, and approximation quality degrades in high dimensions. The candidates
+chosen by an infill criterion are only as good as the model that ranks them.
+
+RASE-GWO deliberately avoids this trade. It builds no model and performs no
+matrix inversion; the screening rule uses only distances that are already
+available from the movement step. The price is that the screening is purely
+geometric and carries no estimate of fitness, which is acceptable precisely
+because the quota is spent on candidates that are close to positions whose
+fitness is known.
+
+\subsection{Sparse and spatially screened evaluation}
+
+A more recent line of work attacks the evaluation budget directly. Small-scale
+learning PSO updates only one or two representative individuals per generation;
+spatially screened PSO and sparse adaptive-quota CSO evaluate a fixed sparse
+subset selected by geometric criteria and use the saved evaluations to fund
+additional generations \cite{ssl-pso,ss-rlpso,saq-cso}. The motivation is the
+same local-smoothness argument used here: once the swarm has contracted,
+neighbouring individuals carry redundant information. Their empirical finding
+that the evaluation quota should be biased strongly toward the promising region
+motivates the action set used in Section~\ref{sec:q}.
+
+Those frameworks were designed for algorithms whose individuals carry memory.
+Transferring the same mechanism to GWO requires the verification anchor
+introduced in Section~III: without it, the elite triangle can be occupied by
+positions that were never evaluated. Furthermore, their exploration criterion
+-- distance from the population centroid -- selects candidates that a
+leader-driven algorithm cannot exploit, because a GWO candidate only influences
+the search after entering the elite triangle. Section~\ref{sec:ablation}
+quantifies both differences.
+
+\subsection{Reinforcement learning for evaluation-budget management}
+
+Reinforcement learning is widely used in evolutionary computation for parameter
+control and operator scheduling \cite{...}. Using it to decide \emph{where the
+evaluation budget goes} is less common, and in the sparse-evaluation
+frameworks cited above the learned quantity is the schedule of search modes
+rather than the allocation of evaluations among candidates. RASE-GWO learns the
+split of the evaluation quota between consensus refinement and minority-leader
+probing, which is a decision about the evaluations themselves. Because the
+reward is bounded and scale invariant, a single Q-table is reused across
+problems whose objective magnitudes differ by many orders of magnitude.

@@ -1,0 +1,227 @@
+\section{Proposed Method}
+
+\subsection{Overview and motivation}
+
+The grey wolf optimizer derives its entire search direction from three positions:
+the alpha, beta and delta wolves. Every other wolf moves toward the triangle
+these three define. Canonical GWO nevertheless spends one true evaluation per
+wolf per generation, i.e. $N$ evaluations to maintain a hierarchy that only
+three wolves are allowed to influence. In expensive black-box optimization the
+opposite asymmetry holds: objective evaluations dominate the cost by orders of
+magnitude, whereas generating a candidate position is a few floating point
+operations.
+
+This paper therefore asks a question that is orthogonal to the design of new
+GWO search operators:
+
+\begin{quote}
+\emph{Given a fixed budget of expensive true evaluations, which of the many
+candidates a GWO can generate should receive them?}
+\end{quote}
+
+We answer it with the Resource-Aware Sparse-Evaluation Grey Wolf Optimizer
+(RASE-GWO). Two principles drive the design.
+
+\emph{Decoupling.} The search state of a wolf and its verified state are stored
+separately. A wolf's \emph{virtual} position $Y_i$ moves every round and costs
+nothing; its \emph{verified} position $X_i^{v}$ is the most recent position that
+has actually been confirmed by the objective function. Only verified positions
+may compete for the leader hierarchy. This is what makes sparse evaluation
+sound for GWO: a leader-driven metaheuristic has no personal-best memory, so
+naively reusing unevaluated positions as leaders would let unverified movement
+contaminate the search direction. Personal-best based algorithms
+(PSO, CSO) are protected by their own memory; GWO is not.
+
+\emph{Over-sampling.} Because a virtual wolf is cheap, we maintain a pool of
+$M = NK$ virtual wolves but spend only $K$ true evaluations per round. The
+evaluation quota is therefore assigned to a candidate pool that is
+$\kappa = M/K$ times larger than the population whose ranking it has to
+establish. The extra cost is arithmetic; the budget of expensive evaluations is
+unchanged.
+
+\subsection{Dual-state wolves}
+
+Let $M$ be the number of virtual wolves, $D$ the problem dimension and
+$[\mathrm{lb},\mathrm{ub}]$ the box. RASE-GWO maintains
+\begin{itemize}
+  \item $Y \in \R^{M\times D}$: virtual (search) positions;
+  \item $X^{v} \in \R^{M\times D}$: verified positions;
+  \item $f^{v} \in \R^{M}$: true fitness of each verified position.
+\end{itemize}
+Only the first $K$ wolves are evaluated during initialization, so the
+initial budget, the initial leader triangle and the initial point set are
+identical to those of the baseline it is compared against (the harness draws one
+shared point pool per problem instance and every algorithm consumes a prefix of
+it).
+
+\subsection{Round structure}
+
+Each round performs three steps.
+
+\paragraph{(a) Virtual movement (no evaluations).}
+With $a = 2-2\,\FE/\mathrm{MaxFE}$ and independent per-wolf, per-dimension
+uniform draws $r_1, r_2 \sim \mathcal{U}(0,1)^D$,
+\begin{equation}
+\begin{aligned}
+A_1 &= 2 a\, r_1 - a, \quad C_1 = 2 r_2, \\
+Y^{(1)} &= X_\alpha - A_1 \odot \lvert C_1 \odot X_\alpha - Y \rvert,
+\end{aligned}
+\end{equation}
+and analogously $Y^{(2)}$, $Y^{(3)}$ from $\beta$ and $\delta$. The virtual
+population is then
+\begin{equation}
+Y \leftarrow \clip\!\left(\tfrac{1}{3}\bigl(Y^{(1)}+Y^{(2)}+Y^{(3)}\bigr)\right).
+\label{eq:move}
+\end{equation}
+Equation~\eqref{eq:move} is the published GWO movement; no term is added.
+
+\paragraph{(b) Geometric screening.}
+The leader consensus centre is
+\begin{equation}
+X_{L} = \tfrac{1}{3}\bigl(X_\alpha + X_\beta + X_\delta\bigr).
+\end{equation}
+Two scores are computed for every virtual wolf:
+\begin{align}
+d^{c}_{i} &= \lVert Y_i - X_{L} \rVert_2, \label{eq:dc}\\
+d^{m}_{i} &= \lVert Y_i - X_{\mu} \rVert_2,
+\quad X_{\mu} = \argmax_{X \in \{X_\alpha, X_\beta, X_\delta\}} \lVert X - X_L \rVert_2 .
+\label{eq:dm}
+\end{align}
+$K_c = \lfloor s K \rceil$ slots are given to the $K_c$ wolves with the smallest
+$d^{c}$ (\emph{consensus refinement}) and the remaining $K_d = K-K_c$ slots to
+the $K_d$ wolves closest to the \emph{minority leader} $X_{\mu}$
+(\emph{minority-leader probing}). The evaluation set is
+$E = \mathrm{unique}(E_c \cup E_m)$, topped up to exactly $K$ elements by
+alternating between the next-best momentum of each list, so every full round
+consumes exactly $K$ true evaluations.
+
+The two criteria answer two different questions. $d^{c}$ selects candidates that
+can refine the basin the swarm already agrees on; $d^{m}$ selects candidates that
+keep the second and third basins of the elite triangle alive. Both are
+$O(MD)$ and neither requires a surrogate model, so no approximation error is
+introduced and no matrix inversion is performed.
+
+Equation~\eqref{eq:dm} deliberately replaces the more familiar
+``farthest from the population centroid'' rule used by sparse-evaluation
+PSO/CSO frameworks. In a leader-driven algorithm only three positions influence
+the search, so a distant candidate that never enters the elite triangle
+contributes nothing; Section~\ref{sec:ablation} shows that crowd-level diversity
+scoring converts far fewer evaluations into improvements than leader-level
+scoring.
+
+\paragraph{(c) True evaluation and leader refresh.}
+For every selected wolf $i \in E$ we compute $v = f(Y_i)$ and set
+\begin{equation}
+X^{v}_i \leftarrow Y_i, \qquad f^{v}_i \leftarrow v
+\end{equation}
+(the \emph{latest} semantics; an archive-style variant that keeps the best
+value is tested in the ablation). The elite triangle is then re-derived by
+sorting $(X^v, f^v)$ and taking its three best entries, so $\alpha,\beta,\delta$
+always correspond to genuinely evaluated positions.
+
+\subsection{Evaluation-quota scheduling}
+\label{sec:q}
+
+The split $K_c{:}K_d$ is the single decision the framework has to make. We learn
+it with tabular Q-learning:
+\begin{itemize}
+  \item \textbf{Actions} $A = \{0.7, 0.9, 1.0\}$: the share $s = K_c/K$ of the
+        quota given to consensus refinement ($s=1$ switches minority probing off).
+  \item \textbf{States} $6$ states $s = (\phi-1)\cdot 2 + \sigma$, where
+        $\phi \in \{\text{early},\text{mid},\text{late}\}$ is the third of the
+        budget consumed and $\sigma \in \{0,1\}$ indicates whether the best
+        verified fitness has stagnated for more than $\tau$ evaluations.
+  \item \textbf{Decision window} the action is held for $W$ true evaluations
+        and re-selected afterwards; a window is long enough that the reward
+        reflects a policy rather than noise.
+  \item \textbf{Reward} scale-invariant and bounded, so one Q-table serves
+        problems of any magnitude:
+  \begin{equation}
+  r = \begin{cases}
+  10\,\dfrac{f_{\text{old}} - f_{\text{new}}}{\lvert f_{\text{old}}\rvert + \lvert f_{\text{new}}\rvert + \epsilon}, & f_{\text{new}} < f_{\text{old}},\\[4pt]
+  -1, & \text{otherwise},
+  \end{cases}
+  \end{equation}
+  where $f_{\text{old}}$, $f_{\text{new}}$ are the best verified fitness at the
+  start and end of the window.
+  \item \textbf{Update} $Q(s,a) \leftarrow Q(s,a) + \alpha\,[\,r + \gamma \max_{a'} Q(s',a') - Q(s,a)\,]$
+        with $\alpha=0.1$, $\gamma=0.9$, and an $\epsilon$-greedy policy with
+        $\epsilon$ decaying from $0.10$ to $0.02$.
+\end{itemize}
+The Q-table is initialised optimistically in proportion to the action values,
+$Q_0(s,a) = s_a$, so the agent starts from the exploitation-dominant policy that
+the fixed-quota study identifies and deviates only when the reward supports it.
+
+\subsection{Complexity}
+
+Per round, movement and screening cost $O(MD)$ and $O(M\log M)$, and the true
+evaluations cost $K\,C_f$, where $C_f$ is the cost of one objective evaluation.
+The total per-round overhead $O(MD + M\log M)$ is independent of $C_f$. For a
+fixed budget of $\mathrm{MaxFE}$ true evaluations the number of rounds is
+$\mathrm{MaxFE}/K$ for both GWO and RASE-GWO, so the two algorithms perform the
+same number of generations and the same number of true evaluations; they differ
+only in how many cheap candidate updates are used to choose the $K$ positions
+that are evaluated. Table~\ref{tab:complexity} summarises the comparison.
+
+\begin{table}[t]
+\centering
+\caption{Per-round cost at an identical true-evaluation quota.}
+\label{tab:complexity}
+\begin{tabular}{lccc}
+\toprule
+Algorithm & Candidates & True evals/round & Overhead \\
+\midrule
+GWO & $N$ & $N$ & $O(ND)$ \\
+Surrogate-assisted GWO & $N_s$ & $K \ll N$ & $O(N_s^3)$ \\
+RASE-GWO & $M=NK$ & $K \ll M$ & $O(MD + M\log M)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Algorithm~\ref{alg:rase} gives the complete procedure.
+
+\begin{table*}[t]
+\centering
+\caption{RASE-GWO}
+\label{alg:rase}
+\begin{tabular}{p{0.94\textwidth}}
+\toprule
+\textbf{Input:} objective $f$, dimension $D$, virtual population $M$,
+per-round quota $K$, budget $\mathrm{MaxFE}$, bounds $[\mathrm{lb},\mathrm{ub}]$,
+initial pool $P$ \\
+\textbf{Output:} best verified fitness $f^\star$ and position $X^\star$ \\
+\midrule
+$Y \leftarrow P(1{:}M,:)$; \; $X^{v} \leftarrow Y$; \; $f^{v} \leftarrow \infty$;
+\; $\FE \leftarrow 0$; \; $T \leftarrow \mathbf{NaN}(\mathrm{MaxFE},1)$ \\
+\FOR{$i=1$ \TO $K$}
+  \STATE $f^{v}_i \leftarrow f(Y_i)$; \; $X^{v}_i \leftarrow Y_i$; \; $\FE \leftarrow \FE+1$;
+         \; $T_{\FE} \leftarrow \min_j f^{v}_j$
+\ENDFOR
+$(X_\alpha,X_\beta,X_\delta) \leftarrow$ three best entries of $(X^{v},f^{v})$ \\
+$Q \leftarrow Q_0$; \; $s \leftarrow$ state$(\FE)$; \; $a \sim \epsilon$-greedy$(Q,s)$;
+   \; $f_{\text{win}} \leftarrow \min f^{v}$ \\
+\WHILE{$\FE < \mathrm{MaxFE}$}
+  \STATE $a \leftarrow 2-2\,\FE/\mathrm{MaxFE}$; move all $M$ virtual wolves by
+         Eq.~\eqref{eq:move} \hfill\COMMENT{no evaluations}
+  \STATE $s_{\text{share}} \leftarrow$ share of action $a$; \;
+         $K_c \leftarrow \mathrm{round}(s_{\text{share}} K)$; \; $K_d \leftarrow K-K_c$
+  \STATE $E_c \leftarrow$ $K_c$ smallest $d^{c}$; \;
+         $E_m \leftarrow$ $K_d$ smallest $d^{m}$ \hfill\COMMENT{Eqs.~\eqref{eq:dc}--\eqref{eq:dm}}
+  \STATE $E \leftarrow \mathrm{unique}(E_c \cup E_m)$; top up to $\lvert E\rvert = K$
+  \FOR{$i \in E$}
+    \STATE $v \leftarrow f(Y_i)$; \; $\FE \leftarrow \FE+1$; \;
+           $X^{v}_i \leftarrow Y_i$; \; $f^{v}_i \leftarrow v$; \; $T_{\FE} \leftarrow \min_j f^{v}_j$
+  \ENDFOR
+  \STATE refresh $(X_\alpha,X_\beta,X_\delta)$ from $(X^{v},f^{v})$
+  \IF{$\FE - \FE_{\text{last}} \geq W$} \hfill\COMMENT{decision window elapsed}
+     \STATE $r \leftarrow$ reward of Eq.~(Q-reward); \; $s' \leftarrow$ state$(\FE)$
+     \STATE $Q(s,a) \leftarrow Q(s,a) + \alpha[r + \gamma \max_{a'} Q(s',a') - Q(s,a)]$
+     \STATE $a \sim \epsilon$-greedy$(Q,s')$; \; $s \leftarrow s'$; \;
+            $\FE_{\text{last}} \leftarrow \FE$; \; $f_{\text{win}} \leftarrow \min f^{v}$
+  \ENDIF
+\ENDWHILE
+\STATE \textbf{return} $f^\star = \min_j f^{v}_j$, \; $X^\star = X^{v}_{\argmin_j f^{v}_j}$
+\\
+\bottomrule
+\end{tabular}
+\end{table*}
