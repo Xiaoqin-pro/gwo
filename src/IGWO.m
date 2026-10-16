@@ -48,7 +48,7 @@ lb=state.lowerBound; ub=state.upperBound; budget=state.maxEvaluations;
 assert(budget>=N && budget==floor(budget),'Budget must be an integer >= N.');
 assert(numel(lb)==D && numel(ub)==D,'Bound vectors must match D=%d.',D);
 % ---- screening options (defaults reproduce the published I-GWO) ----
-p=struct('evalPolicy','full','K',[],'screenPolicy','geometry', ...
+p=struct('evalPolicy','full','K',[],'screenPolicy','geometry','parentAware','off', ...
          'divCriterion','minority','convShare',0.9,'screenRngOffset',4000001);
 fn=fieldnames(p);
 for k=1:numel(fn)
@@ -139,7 +139,7 @@ while fe<budget
         % generation, the remaining candidates are simply not evaluated; the
         % wolves keep their personal records (which is what the verified-state
         % decoupling means).
-        sel=igwoScreen(C,X,Alpha_pos,Beta_pos,Delta_pos,Kq,p,screenStream);
+        sel=igwoScreen(C,X,Alpha_pos,Beta_pos,Delta_pos,Kq,p,screenStream,N);
         for sIdx=sel
             if fe>=budget, break; end
             i=1+mod(sIdx-1,N);
@@ -178,10 +178,11 @@ info.Algorithm='IGWO';
 info.EvalPolicy=p.evalPolicy;
 info.K=Kq;
 info.ScreenPolicy=p.screenPolicy;
+info.ParentAware=p.parentAware;
 end
 
 % ===================== helpers =====================
-function sel=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream)
+function sel=igwoScreen(C,X,Xa,Xb,Xd,Kq,p,stream,N)
 %IGWOSCREEN  Choose Kq of the 2N generated candidates to evaluate.
 %   Convergence slots go to the candidates nearest the leader-consensus centre,
 %   exploration slots to the candidates nearest the minority leader (the member
@@ -212,6 +213,26 @@ end
 Kc=round(p.convShare*Kq); Kc=max(0,min(Kq,Kc)); Kd=Kq-Kc;
 sel=[cOrd(1:min(Kc,n)); dOrd(1:min(Kd,n))];
 sel=unique(sel,'stable')';
+if ~strcmp(p.parentAware,'off') && strcmp(p.screenPolicy,'geometry')
+    % PAEA: coverage-first pass over the union of both families.
+    % Candidate s belongs to parent 1+mod(s-1,N).
+    par=@(s) 1+mod(s-1,N);
+    covered=false(N,1);
+    pick=[];
+    for c=[cOrd; dOrd]'
+        if numel(pick)>=Kq, break; end
+        if strcmp(p.parentAware,'hard') && any(par(pick)==par(c)), continue; end
+        if ~covered(par(c))
+            pick(end+1)=c; covered(par(c))=true; %#ok<AGROW>
+        end
+    end
+    for c=[cOrd; dOrd]'
+        if numel(pick)>=Kq, break; end
+        if strcmp(p.parentAware,'hard') && any(par(pick)==par(c)), continue; end
+        if ~any(pick==c), pick(end+1)=c; end %#ok<AGROW>
+    end
+    sel=pick;
+end
 ci=Kc+1; di=Kd+1; takeConv=true;
 while numel(sel)<min(Kq,n) && (ci<=n || di<=n)
     if takeConv
