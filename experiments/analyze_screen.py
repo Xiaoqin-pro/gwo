@@ -118,9 +118,10 @@ def main():
                 ties += 1
             if len(ea) >= 5 and not np.allclose(ea, er):
                 try:
-                    _, p = stats.ranksum(ea, er)
-                except Exception:
-                    p = 1.0
+                    _, p = stats.mannwhitneyu(ea, er, alternative="two-sided",
+                                              method="asymptotic", use_continuity=True)
+                except ValueError:
+                    p = 1.0   # constant identical samples; not an error
             else:
                 p = 1.0
             pvals.append(p)

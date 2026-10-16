@@ -82,6 +82,17 @@ p.qInit=false;                % optimistic initialisation towards exploitation-h
 p.qInitScale=1;
 p.K=[];                     % absolute per-round quota; empty = round(rho*N)
 p.fillToQuota=true;         % top up to exactly K evals per round
+p.movePolicy='classic';     % 'classic' | 'noC' (Tsai & Shi 2024 correction)
+p.refinePolicy='none';      % 'none' | 'knn'  (two-stage fitness-aware screen)
+p.refinePool=4;             % stage-1 superset size = refinePool*K
+p.knnE=10;                  % verified elite positions used by the k-NN estimate
+p.mixFrac=0;                % share of the virtual pool on the DE family
+p.familyShare=1.0;          % fixed share of the evaluation quota to family 1
+p.familyPolicy='fixed';     % 'fixed' | 'q'
+p.familyShares=[0.9 0.7 0.5 0.3];   % Q action set for the family split
+p.eliteAnchor=false;        % pin the best-ever verified position as alpha
+p.microBatches=1;           % >1: spend the quota in this many sequential
+                            % batches, re-screening after every batch
 p.screenRngOffset=4000001;
 p.quotaRngOffset=3000001;
 end
@@ -129,17 +140,23 @@ end
 assert(numel(p.convShares)>=1 && all(p.convShares>=0 & p.convShares<=1));
 
 Y=pop;                 % virtual  (search) positions
+fam=ones(N,1);          % 1 = GWO movement, 2 = DE/current-to-best movement
+nF2=round(p.mixFrac*N);
+if nF2>0, fam(1:nF2)=2; end
+famImprove=zeros(2,1);  % evaluations that improved the best verified fitness
 evalCount=zeros(N,1);   % diagnostic: how many times each wolf was evaluated
 lastEvalY=Y;            % virtual position at the moment of the last evaluation
 Xv=pop;                % verified (real) positions
 fv=inf(N,1);
 T=nan(budget,1);
 fe=0; gbest=inf; gbestX=pop(1,:); lastImproveFE=N;
+EA=struct('Cost',inf,'Vector',zeros(1,D));   % best verified position ever seen
 for i=1:min(K,N)
     v=f(Y(i,:));
     fe=fe+1;
     fv(i)=v; Xv(i,:)=Y(i,:); evalCount(i)=evalCount(i)+1; lastEvalY(i,:)=Y(i,:);
     if v<gbest, gbest=v; gbestX=Y(i,:); lastImproveFE=fe; end
+    if v<EA.Cost, EA=struct('Cost',v,'Vector',Y(i,:)); end
     T(fe)=gbest;
 end
 
@@ -155,6 +172,14 @@ if isQ
     if p.qInit, Q=repmat(p.convShares(:)',stateCount,1)*p.qInitScale; end
     sIdx=raseStateIndex(fe,budget,fe-lastImproveFE,p);
     aIdx=raseEpsAction(Q,sIdx,p.qEpsStart,quotaStream);
+    if strcmp(p.familyPolicy,'q')
+        Q2=p.qInit*ones(stateCount,numel(p.familyShares));
+        Q2Visits=zeros(stateCount,numel(p.familyShares));
+        famIdx=raseEpsAction(Q2,sIdx,p.qEpsStart,quotaStream);
+    else
+        Q2=[]; Q2Visits=[]; famIdx=1;
+    end
+    famShare=p.familyShare;
 else
     actionCount=1; Q=[]; QVisits=[]; sIdx=1; aIdx=1;
 end
@@ -163,7 +188,7 @@ rewardTrace=zeros(0,4);      % [fe, actionIdx, reward, nextState]
 quotaTrace=zeros(0,5);       % [fe, actionIdx, Kc, Kd, share]
 
 % leadership initialisation (verified information only)
-[Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p);
+[Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p,EA);
 rounds=0; evalsPerRound=zeros(0,1);
 
 % ===================== main loop =====================
@@ -181,7 +206,22 @@ while fe<budget
         A2=2*aC*rand(N,D)-aC; C2=2*rand(N,D);
         A3=2*aC*rand(N,D)-aC; C3=2*rand(N,D);
     end
-    Y=( (Xa-A1.*abs(C1.*Xa-Y)) + (Xb-A2.*abs(C2.*Xb-Y)) + (Xd-A3.*abs(C3.*Xd-Y)) )/3;
+    if strcmp(p.movePolicy,'noC')
+        Yg=( (Xa-A1.*abs(Xa-Y)) + (Xb-A2.*abs(Xb-Y)) + (Xd-A3.*abs(Xd-Y)) )/3;
+    else
+        Yg=( (Xa-A1.*abs(C1.*Xa-Y)) + (Xb-A2.*abs(C2.*Xb-Y)) + (Xd-A3.*abs(C3.*Xd-Y)) )/3;
+    end
+    if nF2>0
+        % family 2: DE/current-to-best/1, dimension-wise
+        idx2=find(fam==2);
+        na=randi(N,numel(idx2),1);
+        na(na==idx2)=mod(na(na==idx2),N)+1;
+        nb=randi(N,numel(idx2),1);
+        nb(nb==idx2 | nb==na)=mod(nb(nb==idx2 | nb==na)+1,N)+1;
+        Y(idx2,:)=Y(idx2,:)+rand(numel(idx2),D).*(Xa-Y(idx2,:)) ...
+                              +rand(numel(idx2),D).*(Y(na,:)-Y(nb,:));
+    end
+    Y(fam==1,:)=Yg(fam==1,:);
     Y=min(max(Y,lb),ub);
 
     % ---- (b) quota for this round ----
@@ -193,77 +233,63 @@ while fe<budget
         share=p.convShare;
     end
     Kc=round(share*K); Kc=max(0,min(K,Kc)); Kd=K-Kc;
+    if strcmp(p.familyPolicy,'q'), famShare=p.familyShares(famIdx);
+    else, famShare=p.familyShare; end
+    famShare=max(0,min(1,famShare));
 
-    % ---- (c) screening: choose the K wolves that consume true evaluations ----
-    if isDense
-        E=1:N;
-    elseif strcmp(p.screenPolicy,'random')
-        E=randperm(screenStream,N,K);
-    else
-        XL=(Xa+Xb+Xd)/3;
-        Cent=mean(Y,1);
-        dc=sqrt(sum((Y-XL).^2,2));            % convergence potential (small = good)
-        switch p.divCriterion
-            case 'leaders'
-                dd=min([sqrt(sum((Y-Xa).^2,2)),sqrt(sum((Y-Xb).^2,2)), ...
-                        sqrt(sum((Y-Xd).^2,2))],[],2);   % far from every leader
-            case 'minority'
-                % probe around the leader that is farthest from the consensus, so a
-                % second/third basin is kept alive instead of collapsing onto alpha
-                cand=[Xa;Xb;Xd];
-                [~,mi]=max(sqrt(sum((cand-XL).^2,2)));
-                dd=sqrt(sum((Y-cand(mi,:)).^2,2));   % small = close to the minority leader
-            otherwise
-                dd=sqrt(sum((Y-Cent).^2,2));      % diversity potential (large = good)
-        end
-        elig=true(N,1);
-        if p.driftGate && nnz(evalCount)>0
-            drift=sqrt(sum((Y-lastEvalY).^2,2));
-            thr=p.driftGateFrac*mean(dd);
-            elig=drift>thr;
-        end
-        [~,cOrd]=sortrows([~elig,dc]);
-        if strcmp(p.divCriterion,'minority')
-            [~,dOrd]=sortrows([~elig,dd]);      % closest to the minority leader
-        else
-            [~,dOrd]=sortrows([~elig,-dd]);
-        end
-        E=[cOrd(1:min(Kc,N)); dOrd(1:min(Kd,N))];
-        E=unique(E,'stable')';
-        if p.fillToQuota && numel(E)<K
-            ci=Kc+1; di=Kd+1; takeConv=true;
-            while numel(E)<K && (ci<=N || di<=N)
-                if takeConv
-                    while ci<=N && any(E==cOrd(ci)), ci=ci+1; end
-                    if ci<=N, E(end+1)=cOrd(ci); ci=ci+1; end %#ok<AGROW>
-                else
-                    while di<=N && any(E==dOrd(di)), di=di+1; end
-                    if di<=N, E(end+1)=dOrd(di); di=di+1; end %#ok<AGROW>
-                end
-                takeConv=~takeConv;
+    % ---- (c,d,e) screening, true evaluation, leadership refresh ----
+    % The quota may be spent in `microBatches` sequential batches.  After every
+    % batch the leaders are refreshed from the newly verified positions and the
+    % still unevaluated candidates are re-screened against the updated geometry,
+    % so the later evaluations of a round already exploit the information of the
+    % earlier ones.  microBatches=1 reproduces the plain round exactly.
+    nB=1;
+    if ~isDense, nB=max(1,min(p.microBatches,K)); end
+    base=floor(K/nB); remK=K-base*nB;
+    nEval=0; done=false(N,1); doneCount=0;
+    for b=1:nB
+        Kb=base+(b<=remK);
+        if Kb<=0 || fe>=budget, continue; end
+        kcb=round(share*Kb); kcb=max(0,min(Kb,kcb)); kdb=Kb-kcb;
+        if nF2>0
+            % split this batch between the two candidate generators
+            Kb1=round(famShare*Kb); Kb1=max(0,min(Kb,Kb1)); Kb2=Kb-Kb1;
+            E=[];
+            if Kb1>0
+                k1c=round(share*Kb1);
+                E=[E, raseScreen(Y,Xa,Xb,Xd,k1c,Kb1-k1c,done|(fam~=1),p, ...
+                     screenStream,isDense,strcmp(p.screenPolicy,'random'),fv,Xv)];
             end
-        end
-    end
-
-    % ---- (d) true evaluations and verified-state update ----
-    nEval=0;
-    for t=1:numel(E)
-        if fe>=budget, break; end
-        i=E(t);
-        v=f(Y(i,:));
-        fe=fe+1; nEval=nEval+1; evalCount(i)=evalCount(i)+1; lastEvalY(i,:)=Y(i,:);
-        if strcmp(p.verifiedMode,'best')
-            if v<fv(i), Xv(i,:)=Y(i,:); fv(i)=v; end
+            if Kb2>0
+                k2c=round(share*Kb2);
+                E=[E, raseScreen(Y,Xa,Xb,Xd,k2c,Kb2-k2c,done|(fam~=2),p, ...
+                     screenStream,isDense,strcmp(p.screenPolicy,'random'),fv,Xv)];
+            end
         else
-            Xv(i,:)=Y(i,:); fv(i)=v;
+            E=raseScreen(Y,Xa,Xb,Xd,kcb,kdb,done,p,screenStream, ...
+                         isDense,strcmp(p.screenPolicy,'random'),fv,Xv);
         end
-        if v<gbest, gbest=v; gbestX=Y(i,:); lastImproveFE=fe; end
-        T(fe)=gbest;
+        for t=1:numel(E)
+            if fe>=budget, break; end
+            i=E(t);
+            v=f(Y(i,:));
+            fe=fe+1; nEval=nEval+1; evalCount(i)=evalCount(i)+1; lastEvalY(i,:)=Y(i,:);
+            if strcmp(p.verifiedMode,'best')
+                if v<fv(i), Xv(i,:)=Y(i,:); fv(i)=v; end
+            else
+                Xv(i,:)=Y(i,:); fv(i)=v;
+            end
+            if v<gbest, gbest=v; gbestX=Y(i,:); lastImproveFE=fe; end
+            if v<EA.Cost
+                EA=struct('Cost',v,'Vector',Y(i,:));
+                famImprove(fam(i))=famImprove(fam(i))+1;
+            end
+            T(fe)=gbest;
+        end
+        done(E)=true; doneCount=doneCount+numel(E);
+        [Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p,EA);
     end
     evalsPerRound(end+1,1)=nEval; %#ok<AGROW>
-
-    % ---- (e) leadership refresh from verified information ----
-    [Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p);
 
     % ---- (f) Q-learning quota update (window boundary) ----
     quotaTrace(end+1,:)=[fe,aIdx,Kc,Kd,share]; %#ok<AGROW>
@@ -274,12 +300,19 @@ while fe<budget
             rew=-1;
         end
         sNext=raseStateIndex(fe,budget,fe-lastImproveFE,p);
+        sIdx_prev_fam=sIdx;
         Q(sIdx,aIdx)=Q(sIdx,aIdx)+p.qAlpha*(rew+p.qGamma*max(Q(sNext,:))-Q(sIdx,aIdx));
         QVisits(sIdx,aIdx)=QVisits(sIdx,aIdx)+1;
         rewardTrace(end+1,:)=[fe,aIdx,rew,sNext]; %#ok<AGROW>
         progress=fe/budget;
         epsNow=p.qEpsStart-(p.qEpsStart-p.qEpsEnd)*progress;
         aIdx=raseEpsAction(Q,sNext,epsNow,quotaStream);
+        if strcmp(p.familyPolicy,'q')
+            Q2(sIdx_prev_fam,famIdx)=Q2(sIdx_prev_fam,famIdx)+p.qAlpha* ...
+                (rew+p.qGamma*max(Q2(sNext,:))-Q2(sIdx_prev_fam,famIdx));
+            Q2Visits(sIdx_prev_fam,famIdx)=Q2Visits(sIdx_prev_fam,famIdx)+1;
+            famIdx=raseEpsAction(Q2,sNext,epsNow,quotaStream);
+        end
         sIdx=sNext; lastQFE=fe; fWin=gbest;
     end
 end
@@ -297,6 +330,12 @@ info.EvalRatio=p.rho;
 info.ScreenPolicy=p.screenPolicy;
 info.QuotaPolicy=p.quotaPolicy;
 info.UseVirtual=p.useVirtual;
+info.RefinePolicy=p.refinePolicy;
+info.FamilyImprove=famImprove;
+info.MixFrac=p.mixFrac;
+info.FamilyShare=famShare;
+info.FamilyQ=Q2;
+info.FamilyQVisits=Q2Visits;
 info.EvalCount=evalCount;
 info.DistinctEvaluatedWolves=sum(evalCount>0);
 info.WallClock=toc(clockStart);
@@ -304,16 +343,121 @@ info.Algorithm='RASE-GWO';
 end
 
 % ===================== helpers =====================
-function [Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p)
-[~,ord]=sort(fv);
-m=min(3,numel(ord));
-idx=ord(1:m);
-if numel(idx)<3, idx=[idx; repmat(idx(end),3-numel(idx),1)]; end
-if p.useVirtual
-    Xa=Xv(idx(1),:); Xb=Xv(idx(2),:); Xd=Xv(idx(3),:);
-else
-    Xa=Y(idx(1),:);  Xb=Y(idx(2),:);  Xd=Y(idx(3),:);
+function E=raseScreen(Y,Xa,Xb,Xd,Kc,Kd,excluded,p,stream,isDense,isRandom,fv,Xv)
+%RASESCREEN  Select the candidates that consume true evaluations this batch.
+%   Candidates already evaluated in the current round (`excluded`) are skipped,
+%   so a micro-batched round never spends two evaluations on the same wolf.
+N=size(Y,1);
+if isDense
+    E=1:N; return;
 end
+avail=find(~excluded);
+if isempty(avail), E=[]; return; end
+nA=numel(avail);
+if isRandom
+    if nA<=Kc+Kd
+        E=avail(:)';
+    else
+        E=avail(randperm(stream,Kc+Kd));
+    end
+    return;
+end
+Ya=Y(avail,:);
+XL=(Xa+Xb+Xd)/3;
+Cent=mean(Y,1);
+dc=sqrt(sum((Ya-XL).^2,2));              % convergence potential (small = good)
+switch p.divCriterion
+    case 'leaders'
+        dd=min([sqrt(sum((Ya-Xa).^2,2)),sqrt(sum((Ya-Xb).^2,2)), ...
+                sqrt(sum((Ya-Xd).^2,2))],[],2);          % far from every leader
+    case 'minority'
+        cand=[Xa;Xb;Xd];
+        [~,mi]=max(sqrt(sum((cand-XL).^2,2)));
+        dd=sqrt(sum((Ya-cand(mi,:)).^2,2));              % close to the minority leader
+    otherwise
+        dd=sqrt(sum((Ya-Cent).^2,2));                    % diversity potential (large = good)
+end
+elig=true(nA,1);
+if p.driftGate && nnz(~excluded)>0
+    drift=sqrt(sum((Ya-Y(excluded,:)).^2,2));
+    elig=drift>p.driftGateFrac*mean(dd);
+end
+[~,cOrd]=sortrows([~elig,dc]);
+if strcmp(p.divCriterion,'minority')
+    [~,dOrd]=sortrows([~elig,dd]);
+else
+    [~,dOrd]=sortrows([~elig,-dd]);
+end
+Kc=min(Kc,nA); Kd=min(Kd,max(0,nA-Kc));
+if strcmp(p.refinePolicy,'knn') && Kc>0 && nA>Kc
+    % ---- stage 2: re-rank the geometric superset by a k-NN fitness estimate ----
+    npool=min(nA,max(Kc+1,round(p.refinePool*Kc)));
+    pool=avail(cOrd(1:npool));
+    [~,eo]=sort(fv);
+    eo=eo(1:min(p.knnE,numel(eo)));
+    eo=eo(isfinite(fv(eo)));
+    if numel(eo)>=2
+        Pv=Xv(eo,:); Fv=fv(eo);
+        d2=zeros(numel(pool),numel(eo));
+        for j=1:numel(eo)
+            d2(:,j)=sum((Y(pool,:)-Pv(j,:)).^2,2);
+        end
+        w=1./(sqrt(d2)+1e-12);
+        est=sum(w.*Fv',2)./sum(w,2);
+        [~,eo2]=sort(est);
+        Ecvg=pool(eo2(1:Kc));
+    else
+        Ecvg=avail(cOrd(1:Kc));
+    end
+else
+    Ecvg=avail(cOrd(1:Kc));
+end
+E=[Ecvg(:); avail(dOrd(1:Kd))];
+E=unique(E,'stable')';
+if p.fillToQuota && numel(E)<min(nA,Kc+Kd)
+    want=min(nA,Kc+Kd);
+    ci=Kc+1; di=Kd+1; takeConv=true;
+    while numel(E)<want && (ci<=nA || di<=nA)
+        if takeConv
+            while ci<=nA && any(E==avail(cOrd(ci))), ci=ci+1; end
+            if ci<=nA, E(end+1)=avail(cOrd(ci)); ci=ci+1; end %#ok<AGROW>
+        else
+            while di<=nA && any(E==avail(dOrd(di))), di=di+1; end
+            if di<=nA, E(end+1)=avail(dOrd(di)); di=di+1; end %#ok<AGROW>
+        end
+        takeConv=~takeConv;
+    end
+end
+end
+
+function [Xa,Xb,Xd]=raseLeaders(Xv,Y,fv,p,EA)
+%RASELEADERS  Elite triangle, built from verified information only.
+%   Default: the three best verified positions.
+%   eliteAnchor=true: the best verified position EVER seen is pinned as
+%   alpha (so a later, worse re-evaluation of the same wolf cannot delete the
+%   elite), while beta and delta are re-derived from the current verified
+%   records.  This keeps a diverse triangle instead of collapsing all three
+%   leaders onto the same historical point.
+if nargin<5, EA=struct('Cost',inf,'Vector',zeros(1,size(Xv,2))); end
+[~,ord]=sort(fv);
+m=min(4,numel(ord));
+idx=ord(1:m);
+if p.useVirtual
+    pos=Xv(idx,:);
+else
+    pos=Y(idx,:);
+end
+cost=fv(idx);
+if p.eliteAnchor && isfinite(EA.Cost)
+    d=sqrt(sum((pos-EA.Vector).^2,2));
+    keep=d>1e-12;                      % drop a duplicate of the anchor
+    pos=[EA.Vector; pos(keep,:)];
+    cost=[EA.Cost; cost(keep)];
+    [~,o2]=sort(cost);
+    pos=pos(o2,:);
+end
+while size(pos,1)<3, pos=[pos; pos(end,:)]; end
+Xa=pos(1,:); Xb=pos(2,:); Xd=pos(3,:);
 end
 
 function s=raseStateIndex(fe,budget,stagAge,p)

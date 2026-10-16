@@ -32,7 +32,7 @@ addpath(fullfile(root,'src'),fullfile(root,'data','cec2017'));
 cecDir=fullfile(root,'data','cec2017');
 
 OVER={'Over1000-90q3','Fixed55min','Over1000-90min','Over1000-100', ...
-      'Over1000-90r','Over1000-90nv','Over1000-90red'};
+      'Over1000-90r','Over1000-90nv'};
 switch mode
     case 'smoke'
         d=struct('funcs',[1 6],'seeds',3001:3002,'maxFE',3000,'D',50, ...
@@ -161,11 +161,13 @@ parfor jj=1:numel(todo)
         tr=nan(nTrace,1);
         m=min(nTrace,numel(T));
         tr(1:m)=T(traceFE(1:m));
-        save(fullfile(runDir,sprintf('trace_%05d.mat',k)),'tr','traceFE');
+        % NOTE: save() is illegal inside parfor (workspace transparency);
+        % writematrix is not, so trajectories are stored as CSV.
+        writematrix(tr,fullfile(runDir,sprintf('trace_%05d.csv',k)));
     catch ME
         row.Seconds=toc(t0);
         row.Status="error";
-        row.Message=string(ME.message);
+        row.Message=string(ME.identifier)+": "+string(ME.message);
     end
     writetable(row,fullfile(runDir,sprintf('run_%05d.csv',k)));
 end
@@ -183,17 +185,12 @@ Result=Result(ord,:);
 writetable(Result,fullfile(outDir,'runs.csv'));
 
 if saveTraces
-    idx=nan(nRuns,1);
-    for k=1:nRuns
-        f=fullfile(runDir,sprintf('trace_%05d.mat',k));
-        if exist(f,'file'), idx(k)=k; end
-    end
     Traces=nan(numel(traceFE),nRuns);
-    for k=find(~isnan(idx))'
-        S=load(fullfile(runDir,sprintf('trace_%05d.mat',k)));
-        Traces(:,k)=S.tr;
+    for k=1:nRuns
+        f=fullfile(runDir,sprintf('trace_%05d.csv',k));
+        if exist(f,'file'), Traces(:,k)=readmatrix(f); end
     end
-    save(fullfile(outDir,'traces.mat'),'Traces','traceFE','-v7.3');
+    save(fullfile(outDir,'traces.mat'),'Traces','traceFE','-v7');
 end
 
 fid_=fopen(logFile,'a');

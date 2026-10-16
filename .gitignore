@@ -31,3 +31,10 @@ __pycache__/
 *.blg
 *.synctex.gz
 texput.log
+
+# experiment scratch: per-run incremental records are rebuildable from runs.csv,
+# and the ad-hoc quick-check outputs are throwaway
+results/*/runs/
+data/cec2017/_*.csv
+_quick*.csv
+_reg.csv

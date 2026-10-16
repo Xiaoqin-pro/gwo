@@ -77,7 +77,7 @@ def main():
             y = df[(df.FunctionID == f) & (df.Algorithm == args.ref)].FinalError.values
             if len(x) >= 5 and not np.allclose(x, y):
                 try:
-                    ps.append(stats.ranksum(x, y)[1])
+                    ps.append(stats.mannwhitneyu(x, y, alternative="two-sided", method="asymptotic", use_continuity=True)[1])
                 except Exception:
                     ps.append(1.0)
             else:

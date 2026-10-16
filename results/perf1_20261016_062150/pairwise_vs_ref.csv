@@ -1,0 +1,8 @@
+Algorithm,FunctionMean_wins,FunctionMean_losses,FunctionMean_ties,PairedSeed_wins,PairedSeed_losses,PairedSeed_ties,Holm_sig_better,Holm_sig_worse,Holm_not_sig,MeanErrorRatio_vs_ref
+IGWO,11,1,0,76,44,0,2,0,10,0.8307753562591389
+Over1000-90q3,10,2,0,75,45,0,2,0,10,0.7024576808701831
+Elite90q3,10,2,0,75,45,0,2,0,10,0.7442840260075042
+Best90min,8,4,0,78,42,0,0,0,12,0.8782806770425972
+BestElite-q3,8,4,0,75,45,0,0,0,12,0.8149653668250855
+Micro4-90q3,11,1,0,79,41,0,1,0,11,0.7770402962895605
+Micro10-90q3,9,3,0,74,46,0,1,0,11,0.8032057104275744
