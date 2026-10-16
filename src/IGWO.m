@@ -49,6 +49,8 @@ assert(budget>=N && budget==floor(budget),'Budget must be an integer >= N.');
 assert(numel(lb)==D && numel(ub)==D,'Bound vectors must match D=%d.',D);
 % ---- screening options (defaults reproduce the published I-GWO) ----
 p=struct('evalPolicy','full','K',[],'screenPolicy','geometry','parentAware','off', ...
+         'successGuide','off','successFrac',0.25,'successArchive',20, ...
+         'successRandom',false,'guideRngOffset',5000001, ...
          'divCriterion','minority','convShare',0.9,'screenRngOffset',4000001);
 fn=fieldnames(p);
 for k=1:numel(fn)
@@ -56,6 +58,9 @@ for k=1:numel(fn)
 end
 isScreen=strcmp(p.evalPolicy,'screen');
 screenStream=RandStream('mt19937ar','Seed',rem(seed+p.screenRngOffset,4294967295));
+guideStream =RandStream('mt19937ar','Seed',rem(seed+p.guideRngOffset,4294967295));
+SuccS=zeros(0,D); SuccX=zeros(0,D);   % archive of verified successful displacements
+useGuide=~strcmp(p.successGuide,'off');
 if isScreen
     Kq=p.K;
     if isempty(Kq), Kq=N; end
@@ -130,6 +135,25 @@ while fe<budget
         lin=sub2ind([N D],nSel(:)',1:D);
         Xd(t,:)=X(t,:)+rand(1,D).*(X(lin)-X(rp(t),:));
     end
+    if useGuide && size(SuccS,1)>0
+        % VS-DLH: add a verified successful direction to a fraction of the DLH
+        % candidates, scaled by that wolf's own GWO step length.  Prefers a
+        % spatially close, recent success; the direction draw uses its own stream.
+        nG=round(p.successFrac*N);
+        gidx=randperm(guideStream,N);
+        for t=gidx(1:min(nG,N))
+            dSucc=sqrt(sum((SuccX-X(t,:)).^2,2));
+            [~,oi]=sort(dSucc);
+            m=min(3,numel(oi));
+            j=oi(1+floor(rand(guideStream)*m));
+            S=SuccS(j,:);
+            if p.successRandom
+                S=randn(guideStream,1,D);      % A4 control: matched-scale random direction
+            end
+            r=norm(Xg(t,:)-X(t,:));
+            Xd(t,:)=Xd(t,:)+p.successGuide*r*S/(norm(S)+1e-12);
+        end
+    end
     Xd=igwoBounds(Xd,X,lb,ub);           % (4)
 
     % ---- select which candidates consume true evaluations ----
@@ -145,7 +169,16 @@ while fe<budget
             i=1+mod(sIdx-1,N);
             v=f(C(sIdx,:));
             fe=fe+1; bestEver=min(bestEver,v); T(fe)=bestEver;
-            if v<pBestScore(i), pBest(i,:)=C(sIdx,:); pBestScore(i)=v; end
+            if v<pBestScore(i)
+                if useGuide
+                    SuccS=[SuccS; C(sIdx,:)-pBest(i,:)]; %#ok<AGROW>
+                    SuccX=[SuccX; pBest(i,:)];          %#ok<AGROW>
+                    if size(SuccS,1)>p.successArchive
+                        SuccS(1,:)=[]; SuccX(1,:)=[];
+                    end
+                end
+                pBest(i,:)=C(sIdx,:); pBestScore(i)=v;
+            end
         end
     else
         % Published I-GWO order: both candidates of a wolf back to back.  The
@@ -156,11 +189,29 @@ while fe<budget
             if fe>=budget, break; end
             vg=f(C(i,:));
             fe=fe+1; bestEver=min(bestEver,vg); T(fe)=bestEver;
-            if vg<pBestScore(i), pBest(i,:)=C(i,:); pBestScore(i)=vg; end
+            if vg<pBestScore(i)
+                if useGuide
+                    SuccS=[SuccS; C(i,:)-pBest(i,:)]; %#ok<AGROW>
+                    SuccX=[SuccX; pBest(i,:)];        %#ok<AGROW>
+                    if size(SuccS,1)>p.successArchive
+                        SuccS(1,:)=[]; SuccX(1,:)=[];
+                    end
+                end
+                pBest(i,:)=C(i,:); pBestScore(i)=vg;
+            end
             if fe>=budget, break; end
             vd=f(C(N+i,:));
             fe=fe+1; bestEver=min(bestEver,vd); T(fe)=bestEver;
-            if vd<pBestScore(i), pBest(i,:)=C(N+i,:); pBestScore(i)=vd; end
+            if vd<pBestScore(i)
+                if useGuide
+                    SuccS=[SuccS; C(N+i,:)-pBest(i,:)]; %#ok<AGROW>
+                    SuccX=[SuccX; pBest(i,:)];          %#ok<AGROW>
+                    if size(SuccS,1)>p.successArchive
+                        SuccS(1,:)=[]; SuccX(1,:)=[];
+                    end
+                end
+                pBest(i,:)=C(N+i,:); pBestScore(i)=vd;
+            end
         end
     end
     X=pBest; fit=pBestScore;             % (1)
@@ -179,6 +230,8 @@ info.EvalPolicy=p.evalPolicy;
 info.K=Kq;
 info.ScreenPolicy=p.screenPolicy;
 info.ParentAware=p.parentAware;
+info.SuccessGuide=p.successGuide;
+info.SuccessArchiveSize=size(SuccS,1);
 end
 
 % ===================== helpers =====================
