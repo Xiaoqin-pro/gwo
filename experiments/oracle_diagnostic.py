@@ -50,24 +50,35 @@ def main():
         sub = piv.loc[fs]
         wins = int((sub[GEO] < sub[RND]).sum())
         n = len(sub)
-        # effect size: matched-pairs rank-biserial from the signed ranks
-        d = sub[GEO].values - sub[RND].values
-        d = d[np.isfinite(d)]
-        if len(d) and not np.allclose(d, 0):
-            z = stats.wilcoxon(d, alternative="two-sided")
+        # CORRECTED STATISTIC.  The independent unit is the FUNCTION, not the
+        # (function, seed) pair: pooling seeds mixes error scales that differ by
+        # orders of magnitude across CEC2017 functions and lets a few large-scale
+        # functions dominate a rank test.  So each function is first collapsed to
+        # one scale-free number -- the median over its seeds of log(geo/random) --
+        # and the class test is a Wilcoxon signed-rank over those per-function
+        # values (n = number of functions in the class), with the Hodges-Lehmann
+        # median of the log ratios and a rank-biserial effect size.
+        per_fn = []
+        for f in fs:
+            d = np.log((sub.loc[f, GEO].values + 1e-30) /
+                       (sub.loc[f, RND].values + 1e-30))
+            d = d[np.isfinite(d)]
+            per_fn.append(np.median(d))
+        per_fn = np.array(per_fn)
+        if len(per_fn) >= 2 and not np.allclose(per_fn, 0):
             try:
-                r = z.statistic / (len(d) * (len(d) + 1) / 2)
+                z = stats.wilcoxon(per_fn, alternative="two-sided")
+                p = float(z.pvalue)
+                r = float(z.statistic / (len(per_fn) * (len(per_fn) + 1) / 2))
             except Exception:
-                r = np.nan
-            try:
-                p = z.pvalue
-            except Exception:
-                p = z[1]
+                p, r = 1.0, np.nan
         else:
-            r, p = np.nan, 1.0
+            p, r = 1.0, np.nan
+        hl = float(np.median(np.exp(per_fn))) if len(per_fn) else np.nan
         rows.append(dict(Class=cname, Functions=len(fs),
-                         MedianRatio=float(ratio), WinRate=wins / n if n else np.nan,
-                         Paired_p=float(p), RankBiserial=float(r)))
+                         MedianRatio=float(ratio), FnMedianRatio=hl,
+                         WinRate=wins / n if n else np.nan,
+                         FnLevel_p=float(p), RankBiserial=float(r)))
     out = pd.DataFrame(rows)
     out.to_csv(dst / "oracle_class_diagnostic.csv", index=False)
     print(out.round(4).to_string(index=False))
